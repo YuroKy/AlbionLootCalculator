@@ -61,16 +61,3 @@ export function splitLoot(participants) {
     transactions,
   };
 }
-
-export function isValidSilverInput(value) {
-  const normalized = normalizeSilverInput(value);
-  return normalized !== '' && /^\d+$/.test(normalized);
-}
-
-export function parseSilverInput(value) {
-  return Number.parseInt(normalizeSilverInput(value), 10);
-}
-
-export function normalizeSilverInput(value) {
-  return String(value ?? '').replace(/[,\s]+/g, '').trim();
-}

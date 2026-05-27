@@ -1,10 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
+  clampGroupSize,
+  deserializeState,
+  normalizeAppState,
+  serializeState,
+} from '../lib/state';
+import {
+  formatSilver,
+  formatSilverInput,
   isValidSilverInput,
   normalizeSilverInput,
   parseSilverInput,
-  splitLoot,
-} from '../lib/splitLoot';
+} from '../lib/silver';
+import { splitLoot } from '../lib/splitLoot';
 
 describe('splitLoot', () => {
   it('splits a balanced two player dungeon without transactions', () => {
@@ -81,13 +89,15 @@ describe('silver input helpers', () => {
     expect(isValidSilverInput('12000')).toBe(true);
     expect(isValidSilverInput('1 200 000')).toBe(true);
     expect(isValidSilverInput('1,200,000')).toBe(true);
+    expect(isValidSilverInput('')).toBe(true);
     expect(isValidSilverInput('0')).toBe(true);
     expect(isValidSilverInput('12.5')).toBe(false);
     expect(isValidSilverInput('-1')).toBe(false);
-    expect(isValidSilverInput('')).toBe(false);
+    expect(isValidSilverInput('abc')).toBe(false);
   });
 
   it('parses valid silver input', () => {
+    expect(parseSilverInput('')).toBe(0);
     expect(parseSilverInput('00125')).toBe(125);
     expect(parseSilverInput('1 200 000')).toBe(1200000);
     expect(parseSilverInput('1,200,000')).toBe(1200000);
@@ -96,5 +106,46 @@ describe('silver input helpers', () => {
   it('normalizes masked silver values', () => {
     expect(normalizeSilverInput(' 12 345 678 ')).toBe('12345678');
     expect(normalizeSilverInput('12,345,678')).toBe('12345678');
+  });
+
+  it('formats silver values with comma separators', () => {
+    expect(formatSilver(1200000)).toBe('1,200,000');
+    expect(formatSilverInput('1200000')).toBe('1,200,000');
+    expect(formatSilverInput('1,2a0 0,000')).toBe('1,200,000');
+  });
+});
+
+describe('state helpers', () => {
+  it('clamps group sizes to the supported range', () => {
+    expect(clampGroupSize(0)).toBe(1);
+    expect(clampGroupSize(5)).toBe(5);
+    expect(clampGroupSize(99)).toBe(10);
+  });
+
+  it('serializes and restores shareable state', () => {
+    const state = {
+      groupSize: 2,
+      participants: [
+        { id: 'player-1', name: 'Авангард', loot: '1,200,000' },
+        { id: 'player-2', name: 'Містик', loot: '0' },
+      ],
+    };
+
+    expect(deserializeState(serializeState(state))).toEqual(state);
+  });
+
+  it('normalizes incoming app state', () => {
+    expect(
+      normalizeAppState({
+        groupSize: 2,
+        participants: [{ name: 'A', loot: 100 }, { name: 'B', loot: '0' }, { name: 'C' }],
+      }),
+    ).toEqual({
+      groupSize: 2,
+      participants: [
+        { id: 'player-1', name: 'A', loot: '100' },
+        { id: 'player-2', name: 'B', loot: '0' },
+      ],
+    });
   });
 });
