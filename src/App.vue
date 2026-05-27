@@ -21,6 +21,14 @@ import {
   Users,
 } from '@lucide/vue';
 import { GROUP_SIZES, splitLoot } from './lib/splitLoot';
+import {
+  HISTORY_STORAGE_KEY,
+  calculateSessionStats,
+  createHistoryEntry,
+  formatHistoryEntry,
+  normalizeHistoryEntries,
+  summarizeHistoryEntry,
+} from './lib/history';
 import { formatSilver, formatSilverInput, isValidSilverInput, parseSilverInput } from './lib/silver';
 import {
   MAX_GROUP_SIZE,
@@ -42,9 +50,12 @@ const sampleLoot = {
 
 const groupSize = ref(3);
 const participants = ref(createParticipants(groupSize.value));
+const historyEntries = ref([]);
 const copyStatus = ref('');
+const completionStamp = ref(false);
 let saveReady = false;
 let copyStatusTimer;
+let completionStampTimer;
 
 onMounted(() => {
   const loadedState = loadInitialState();
@@ -53,6 +64,7 @@ onMounted(() => {
     participants.value = ensureParticipantCount(loadedState.participants, loadedState.groupSize);
   }
 
+  historyEntries.value = loadHistoryEntries();
   saveReady = true;
 });
 
@@ -61,6 +73,14 @@ watch(
   () => {
     if (!saveReady) return;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(currentState()));
+  },
+  { deep: true },
+);
+
+watch(
+  historyEntries,
+  () => {
+    localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(historyEntries.value));
   },
   { deep: true },
 );
@@ -105,6 +125,39 @@ const transactions = computed(() => lootResult.value?.transactions ?? []);
 const hasTransfers = computed(() => transactions.value.length > 0);
 const canAddParticipant = computed(() => participants.value.length < MAX_GROUP_SIZE);
 const canRemoveParticipant = computed(() => participants.value.length > MIN_GROUP_SIZE);
+const canCompleteDistribution = computed(() =>
+  Boolean(!hasInvalidLoot.value && participants.value.length > 0 && lootResult.value),
+);
+const sessionStats = computed(() => calculateSessionStats(historyEntries.value));
+const totalChartBars = computed(() => {
+  const maxTotal = Math.max(...historyEntries.value.map((entry) => entry.total), 1);
+
+  return historyEntries.value.slice(0, 8).map((entry) => ({
+    id: entry.id,
+    label: shortTime(entry.createdAt),
+    value: entry.total,
+    width: `${Math.max(8, Math.round((entry.total / maxTotal) * 100))}%`,
+  }));
+});
+const transferChartBars = computed(() => {
+  const maxTransfers = Math.max(...historyEntries.value.map((entry) => entry.transactions.length), 1);
+
+  return historyEntries.value.slice(0, 8).map((entry) => ({
+    id: entry.id,
+    label: shortTime(entry.createdAt),
+    value: entry.transactions.length,
+    width: `${Math.max(8, Math.round((entry.transactions.length / maxTransfers) * 100))}%`,
+  }));
+});
+const topPlayerBars = computed(() => {
+  const maxLoot = Math.max(...sessionStats.value.topPlayers.map((player) => player.loot), 1);
+
+  return sessionStats.value.topPlayers.map((player) => ({
+    name: player.name,
+    value: player.loot,
+    width: `${Math.max(8, Math.round((player.loot / maxLoot) * 100))}%`,
+  }));
+});
 
 function loadInitialState() {
   const queryState = normalizeAppState(
@@ -119,6 +172,17 @@ function loadInitialState() {
     return normalizeAppState(JSON.parse(savedState));
   } catch {
     return null;
+  }
+}
+
+function loadHistoryEntries() {
+  const savedHistory = localStorage.getItem(HISTORY_STORAGE_KEY);
+  if (!savedHistory) return [];
+
+  try {
+    return normalizeHistoryEntries(JSON.parse(savedHistory));
+  } catch {
+    return [];
   }
 }
 
@@ -301,6 +365,63 @@ function copyShareLink() {
   copyToClipboard(shareUrl(), 'Лінк скопійовано');
 }
 
+function completeDistribution() {
+  if (!canCompleteDistribution.value) return;
+
+  const entry = createHistoryEntry({
+    participants: lootResult.value.balances,
+    result: lootResult.value,
+  });
+
+  historyEntries.value = [entry, ...historyEntries.value].slice(0, 50);
+  showCopyStatus('Розподіл завершено і додано в журнал');
+  showCompletionStamp();
+}
+
+function copyHistoryEntry(entry) {
+  copyToClipboard(formatHistoryEntry(entry, formatSilver), 'Запис журналу скопійовано');
+}
+
+function deleteHistoryEntry(entryId) {
+  historyEntries.value = historyEntries.value.filter((entry) => entry.id !== entryId);
+}
+
+function clearHistory() {
+  historyEntries.value = [];
+  showCopyStatus('Журнал очищено');
+}
+
+function historySummary(entry) {
+  return summarizeHistoryEntry(entry);
+}
+
+function shortTime(value) {
+  return new Intl.DateTimeFormat('uk-UA', {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value));
+}
+
+function historyTime(value) {
+  return new Intl.DateTimeFormat('uk-UA', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value));
+}
+
+function showCompletionStamp() {
+  window.clearTimeout(completionStampTimer);
+  completionStamp.value = false;
+  window.requestAnimationFrame(() => {
+    completionStamp.value = true;
+    completionStampTimer = window.setTimeout(() => {
+      completionStamp.value = false;
+    }, 1400);
+  });
+}
+
 function showCopyStatus(message) {
   window.clearTimeout(copyStatusTimer);
   copyStatus.value = message;
@@ -391,6 +512,10 @@ function showCopyStatus(message) {
         </div>
 
         <div class="action-bar" aria-label="Швидкі дії">
+          <button type="button" :disabled="!canCompleteDistribution" @click="completeDistribution">
+            <Sparkles :size="16" />
+            <span>Завершити розподіл</span>
+          </button>
           <button type="button" @click="copyTransfers">
             <Copy :size="16" />
             <span>Скопіювати перекази</span>
@@ -414,19 +539,20 @@ function showCopyStatus(message) {
         </div>
 
         <p v-if="copyStatus" class="copy-status" role="status">{{ copyStatus }}</p>
+        <p v-if="completionStamp" class="completion-stamp" aria-live="polite">Розподіл завершено</p>
 
         <div class="summary-strip" aria-label="Підсумок луту">
           <article>
             <span>Усього срібла</span>
-            <strong>{{ formattedTotal }}</strong>
+            <strong :key="formattedTotal">{{ formattedTotal }}</strong>
           </article>
           <article>
             <span>Базова частка</span>
-            <strong>{{ formattedShare }}</strong>
+            <strong :key="formattedShare">{{ formattedShare }}</strong>
           </article>
           <article>
             <span>Остача</span>
-            <strong>{{ formattedRemainder }}</strong>
+            <strong :key="formattedRemainder">{{ formattedRemainder }}</strong>
           </article>
         </div>
 
@@ -547,5 +673,123 @@ function showCopyStatus(message) {
         </div>
       </aside>
     </main>
+
+    <section class="session-dashboard" aria-labelledby="session-dashboard-title">
+      <div class="dashboard-heading">
+        <div>
+          <p>Session board</p>
+          <h2 id="session-dashboard-title">Статистика сесії</h2>
+        </div>
+        <button type="button" :disabled="historyEntries.length === 0" @click="clearHistory">
+          <Trash2 :size="16" />
+          <span>Очистити журнал</span>
+        </button>
+      </div>
+
+      <div class="stats-grid" aria-label="Підсумкова статистика">
+        <article>
+          <span>Розподілів</span>
+          <strong>{{ sessionStats.splitCount }}</strong>
+        </article>
+        <article>
+          <span>Усього silver</span>
+          <strong>{{ formatSilver(sessionStats.totalSilver) }}</strong>
+        </article>
+        <article>
+          <span>Середній total</span>
+          <strong>{{ formatSilver(sessionStats.averageTotal) }}</strong>
+        </article>
+        <article>
+          <span>Середня частка</span>
+          <strong>{{ formatSilver(sessionStats.averageShare) }}</strong>
+        </article>
+        <article>
+          <span>Переказів</span>
+          <strong>{{ sessionStats.totalTransfers }}</strong>
+        </article>
+        <article>
+          <span>Топ лутер</span>
+          <strong>{{ sessionStats.topPlayer?.name ?? '—' }}</strong>
+        </article>
+      </div>
+
+      <div class="charts-grid" aria-label="Графіки сесії">
+        <article class="chart-panel">
+          <h3>Total silver</h3>
+          <div v-if="totalChartBars.length" class="bar-chart">
+            <div v-for="bar in totalChartBars" :key="bar.id" class="chart-row">
+              <span>{{ bar.label }}</span>
+              <div><i :style="{ width: bar.width }" /></div>
+              <b>{{ formatSilver(bar.value) }}</b>
+            </div>
+          </div>
+          <p v-else>Заверши перший розподіл, щоб побачити графік.</p>
+        </article>
+
+        <article class="chart-panel">
+          <h3>Кількість переказів</h3>
+          <div v-if="transferChartBars.length" class="bar-chart transfer-chart">
+            <div v-for="bar in transferChartBars" :key="bar.id" class="chart-row">
+              <span>{{ bar.label }}</span>
+              <div><i :style="{ width: bar.width }" /></div>
+              <b>{{ bar.value }}</b>
+            </div>
+          </div>
+          <p v-else>Поки немає завершених розподілів.</p>
+        </article>
+
+        <article class="chart-panel">
+          <h3>Топ гравці за лутом</h3>
+          <div v-if="topPlayerBars.length" class="bar-chart player-chart">
+            <div v-for="bar in topPlayerBars" :key="bar.name" class="chart-row">
+              <span>{{ bar.name }}</span>
+              <div><i :style="{ width: bar.width }" /></div>
+              <b>{{ formatSilver(bar.value) }}</b>
+            </div>
+          </div>
+          <p v-else>Історія ще порожня.</p>
+        </article>
+      </div>
+
+      <div class="history-panel" aria-labelledby="history-title">
+        <div class="history-heading">
+          <div>
+            <p>Completed splits</p>
+            <h2 id="history-title">Журнал розподілів</h2>
+          </div>
+        </div>
+
+        <div v-if="historyEntries.length === 0" class="history-empty">
+          <Sparkles :size="28" />
+          <strong>Журнал порожній</strong>
+          <span>Натисни “Завершити розподіл”, щоб додати перший запис.</span>
+        </div>
+
+        <div v-else class="history-table">
+          <div class="history-head" aria-hidden="true">
+            <span>Час</span>
+            <span>Гравці</span>
+            <span>Total</span>
+            <span>Частка</span>
+            <span>Перекази</span>
+            <span>Топ</span>
+            <span>Дії</span>
+          </div>
+
+          <div v-for="entry in historyEntries" :key="entry.id" class="history-row">
+            <span>{{ historyTime(entry.createdAt) }}</span>
+            <span>{{ historySummary(entry).playerCount }}</span>
+            <strong>{{ formatSilver(entry.total) }}</strong>
+            <span>{{ formatSilver(entry.baseShare) }}</span>
+            <span>{{ historySummary(entry).transferCount }}</span>
+            <span>{{ historySummary(entry).largestPayer }} → {{ historySummary(entry).largestReceiver }}</span>
+            <div class="history-actions">
+              <button type="button" @click="copyHistoryEntry(entry)">Скопіювати</button>
+              <button type="button" @click="deleteHistoryEntry(entry.id)">Видалити</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
   </div>
 </template>

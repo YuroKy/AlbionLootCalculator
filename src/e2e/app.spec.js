@@ -1,7 +1,11 @@
 import { expect, test } from '@playwright/test';
 
-test('renders, masks silver, manages players, and copies actions', async ({ page }, testInfo) => {
+test('renders, masks silver, manages players, logs history, and shows charts', async ({
+  page,
+}, testInfo) => {
   await page.goto('/');
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
 
   await expect(page.getByRole('heading', { name: 'Трибунал Луту' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Розподіл луту' })).toBeVisible();
@@ -24,6 +28,20 @@ test('renders, masks silver, manages players, and copies actions', async ({ page
 
   await page.getByRole('button', { name: 'Скопіювати лінк' }).click();
   await expect(page.getByRole('status')).toContainText('Лінк скопійовано');
+
+  await page.getByRole('button', { name: 'Завершити розподіл' }).click();
+  await expect(page.getByText('Розподіл завершено').first()).toBeVisible();
+  await expect(page.locator('.history-row')).toHaveCount(1);
+  await expect(page.locator('.chart-row').first()).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Статистика сесії' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Журнал розподілів' })).toBeVisible();
+
+  await page.reload();
+  await expect(page.locator('.history-row')).toHaveCount(1);
+
+  await page.getByRole('button', { name: 'Очистити журнал' }).click();
+  await expect(page.locator('.history-row')).toHaveCount(0);
+  await expect(page.getByText('Журнал порожній')).toBeVisible();
 
   await page.screenshot({ path: testInfo.outputPath(`${testInfo.project.name}-smoke.png`) });
 });

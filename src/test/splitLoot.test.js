@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  calculateSessionStats,
+  createHistoryEntry,
+  formatHistoryEntry,
+  normalizeHistoryEntries,
+  summarizeHistoryEntry,
+} from '../lib/history';
+import {
   clampGroupSize,
   deserializeState,
   normalizeAppState,
@@ -147,5 +154,89 @@ describe('state helpers', () => {
         { id: 'player-2', name: 'B', loot: '0' },
       ],
     });
+  });
+});
+
+describe('history helpers', () => {
+  const result = splitLoot([
+    { id: 'a', name: 'A', loot: 300 },
+    { id: 'b', name: 'B', loot: 0 },
+    { id: 'c', name: 'C', loot: 0 },
+  ]);
+
+  it('creates a history entry snapshot', () => {
+    const entry = createHistoryEntry({
+      participants: result.balances,
+      result,
+      now: new Date('2026-05-27T10:00:00.000Z'),
+    });
+
+    expect(entry.createdAt).toBe('2026-05-27T10:00:00.000Z');
+    expect(entry.total).toBe(300);
+    expect(entry.baseShare).toBe(100);
+    expect(entry.participants).toHaveLength(3);
+    expect(entry.transactions).toEqual([
+      { fromId: 'a', fromName: 'A', toId: 'b', toName: 'B', amount: 100 },
+      { fromId: 'a', fromName: 'A', toId: 'c', toName: 'C', amount: 100 },
+    ]);
+  });
+
+  it('summarizes a history entry', () => {
+    const entry = createHistoryEntry({
+      participants: result.balances,
+      result,
+      now: new Date('2026-05-27T10:00:00.000Z'),
+    });
+
+    expect(summarizeHistoryEntry(entry)).toEqual({
+      playerCount: 3,
+      transferCount: 2,
+      largestPayer: 'A',
+      largestReceiver: 'B',
+    });
+  });
+
+  it('calculates empty and populated session stats', () => {
+    expect(calculateSessionStats([])).toEqual({
+      splitCount: 0,
+      totalSilver: 0,
+      averageTotal: 0,
+      averageShare: 0,
+      totalTransfers: 0,
+      topPlayer: null,
+      topPlayers: [],
+    });
+
+    const entry = createHistoryEntry({
+      participants: result.balances,
+      result,
+      now: new Date('2026-05-27T10:00:00.000Z'),
+    });
+
+    expect(calculateSessionStats([entry])).toMatchObject({
+      splitCount: 1,
+      totalSilver: 300,
+      averageTotal: 300,
+      averageShare: 100,
+      totalTransfers: 2,
+      topPlayer: { name: 'A', loot: 300 },
+    });
+  });
+
+  it('normalizes malformed history entries', () => {
+    expect(normalizeHistoryEntries(null)).toEqual([]);
+    expect(normalizeHistoryEntries([{ total: '500', transactions: 'bad' }])).toMatchObject([
+      { total: 500, transactions: [] },
+    ]);
+  });
+
+  it('formats a copyable history entry', () => {
+    const entry = createHistoryEntry({
+      participants: result.balances,
+      result,
+      now: new Date('2026-05-27T10:00:00.000Z'),
+    });
+
+    expect(formatHistoryEntry(entry, formatSilver)).toContain('A -> B: 100 silver');
   });
 });
