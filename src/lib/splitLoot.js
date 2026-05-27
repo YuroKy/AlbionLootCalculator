@@ -72,5 +72,5 @@ export function parseSilverInput(value) {
 }
 
 export function normalizeSilverInput(value) {
-  return String(value ?? '').replace(/\s+/g, '').trim();
+  return String(value ?? '').replace(/[,\s]+/g, '').trim();
 }

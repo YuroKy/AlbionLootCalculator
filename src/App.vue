@@ -95,18 +95,43 @@ function createParticipants(size) {
 }
 
 function formatSilver(value) {
-  return new Intl.NumberFormat('uk-UA').format(value);
+  return formatSilverNumber(value);
 }
 
 function formatSilverInput(value) {
   const normalized = normalizeSilverInput(value).replace(/\D/g, '');
   if (normalized === '') return '';
 
-  return normalized.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  return formatSilverNumber(Number(normalized));
+}
+
+function formatSilverNumber(value) {
+  return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
 function handleSilverInput(index, event) {
   participants.value[index].loot = formatSilverInput(event.target.value);
+}
+
+function handleSilverKeydown(event) {
+  const allowedControlKeys = [
+    'Backspace',
+    'Delete',
+    'Tab',
+    'Enter',
+    'Escape',
+    'ArrowLeft',
+    'ArrowRight',
+    'ArrowUp',
+    'ArrowDown',
+    'Home',
+    'End',
+  ];
+
+  if (allowedControlKeys.includes(event.key) || event.ctrlKey || event.metaKey) return;
+  if (/^\d$/.test(event.key)) return;
+
+  event.preventDefault();
 }
 
 function setGroupSize(size) {
@@ -244,8 +269,10 @@ function balanceTone(participantId) {
                 :value="participants[index].loot"
                 :class="{ invalid: !participant.isLootValid }"
                 inputmode="numeric"
+                pattern="[0-9]*"
                 autocomplete="off"
                 aria-label="Лут у silver"
+                @keydown="handleSilverKeydown"
                 @input="handleSilverInput(index, $event)"
               />
             </label>
