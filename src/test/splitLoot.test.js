@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { isValidSilverInput, parseSilverInput, splitLoot } from '../lib/splitLoot';
+import {
+  isValidSilverInput,
+  normalizeSilverInput,
+  parseSilverInput,
+  splitLoot,
+} from '../lib/splitLoot';
 
 describe('splitLoot', () => {
   it('splits a balanced two player dungeon without transactions', () => {
@@ -74,6 +79,7 @@ describe('splitLoot', () => {
 describe('silver input helpers', () => {
   it('accepts integer silver values only', () => {
     expect(isValidSilverInput('12000')).toBe(true);
+    expect(isValidSilverInput('1 200 000')).toBe(true);
     expect(isValidSilverInput('0')).toBe(true);
     expect(isValidSilverInput('12.5')).toBe(false);
     expect(isValidSilverInput('-1')).toBe(false);
@@ -82,5 +88,10 @@ describe('silver input helpers', () => {
 
   it('parses valid silver input', () => {
     expect(parseSilverInput('00125')).toBe(125);
+    expect(parseSilverInput('1 200 000')).toBe(1200000);
+  });
+
+  it('normalizes masked silver values', () => {
+    expect(normalizeSilverInput(' 12 345 678 ')).toBe('12345678');
   });
 });

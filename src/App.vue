@@ -16,6 +16,7 @@ import {
 import {
   GROUP_SIZES,
   isValidSilverInput,
+  normalizeSilverInput,
   parseSilverInput,
   splitLoot,
 } from './lib/splitLoot';
@@ -39,7 +40,7 @@ watch(groupSize, (nextSize, previousSize) => {
 
   if (nextSize > previousSize) {
     nextParticipants.slice(previousSize).forEach((participant, offset) => {
-      participant.loot = sampleLoot[nextSize][previousSize + offset] ?? '0';
+      participant.loot = formatSilverInput(sampleLoot[nextSize][previousSize + offset] ?? '0');
     });
   }
 
@@ -89,12 +90,23 @@ function createParticipants(size) {
   return Array.from({ length: size }, (_, index) => ({
     id: `player-${index + 1}`,
     name: defaultNames[index],
-    loot: sampleLoot[size][index] ?? '0',
+    loot: formatSilverInput(sampleLoot[size][index] ?? '0'),
   }));
 }
 
 function formatSilver(value) {
   return new Intl.NumberFormat('uk-UA').format(value);
+}
+
+function formatSilverInput(value) {
+  const normalized = normalizeSilverInput(value).replace(/\D/g, '');
+  if (normalized === '') return '';
+
+  return normalized.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+}
+
+function handleSilverInput(index, event) {
+  participants.value[index].loot = formatSilverInput(event.target.value);
 }
 
 function setGroupSize(size) {
@@ -229,11 +241,12 @@ function balanceTone(participantId) {
             <label class="silver-input">
               <span>Лут у silver</span>
               <input
-                v-model="participants[index].loot"
+                :value="participants[index].loot"
                 :class="{ invalid: !participant.isLootValid }"
                 inputmode="numeric"
                 autocomplete="off"
                 aria-label="Лут у silver"
+                @input="handleSilverInput(index, $event)"
               />
             </label>
 

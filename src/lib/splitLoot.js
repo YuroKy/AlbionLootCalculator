@@ -63,10 +63,14 @@ export function splitLoot(participants) {
 }
 
 export function isValidSilverInput(value) {
-  const trimmed = String(value ?? '').trim();
-  return trimmed !== '' && /^\d+$/.test(trimmed);
+  const normalized = normalizeSilverInput(value);
+  return normalized !== '' && /^\d+$/.test(normalized);
 }
 
 export function parseSilverInput(value) {
-  return Number.parseInt(String(value).trim(), 10);
+  return Number.parseInt(normalizeSilverInput(value), 10);
+}
+
+export function normalizeSilverInput(value) {
+  return String(value ?? '').replace(/\s+/g, '').trim();
 }
