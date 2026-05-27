@@ -1,11 +1,15 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
 import {
+  ArrowRightLeft,
   Coins,
   Crown,
   Gem,
+  HandCoins,
+  PackageOpen,
+  Scale,
   ScrollText,
-  Shield,
+  ShieldAlert,
   Sparkles,
   Users,
 } from '@lucide/vue';
@@ -116,45 +120,53 @@ function balanceTone(participantId) {
   if (balance.balance < 0) return 'receive';
   return 'balanced';
 }
-
 </script>
 
 <template>
   <div class="app-shell">
-    <div class="ember-field" aria-hidden="true">
-      <span />
-      <span />
-      <span />
-      <span />
-      <span />
-    </div>
-
-    <header class="app-header">
-      <div class="brand-lockup">
-        <div class="brand-mark">
+    <header class="top-hud" aria-label="Підсумок калькулятора">
+      <div class="player-plate">
+        <div class="portrait-ring">
           <Crown :size="28" stroke-width="1.8" />
         </div>
-        <div>
-          <p class="eyebrow">Albion Silver</p>
+        <div class="player-copy">
+          <span>Albion Silver</span>
           <h1>Трибунал Луту</h1>
         </div>
       </div>
 
-      <div class="vault-total" aria-live="polite">
-        <Coins :size="20" />
-        <span>{{ formattedTotal }}</span>
-        <small>silver у сховищі</small>
+      <div class="hud-actions">
+        <div class="hud-chip">
+          <Coins :size="18" />
+          <strong>{{ formattedTotal }}</strong>
+          <span>усього</span>
+        </div>
+        <div class="hud-chip">
+          <Scale :size="18" />
+          <strong>{{ formattedShare }}</strong>
+          <span>частка</span>
+        </div>
       </div>
     </header>
 
-    <main class="workspace">
-      <section class="calculator-panel" aria-labelledby="split-title">
-        <div class="panel-heading">
-          <div>
-            <p class="eyebrow">Паті данжу</p>
-            <h2 id="split-title">Рівний розподіл</h2>
+    <main class="game-window">
+      <section class="market-window" aria-labelledby="split-title">
+        <div class="window-titlebar">
+          <div class="title-icon">
+            <HandCoins :size="30" stroke-width="1.8" />
           </div>
+          <div>
+            <p>Caerleon Marketplace</p>
+            <h2 id="split-title">Розподіл луту</h2>
+          </div>
+          <div class="title-total">
+            <Coins :size="19" />
+            <span>{{ formattedTotal }}</span>
+          </div>
+        </div>
 
+        <div class="market-toolbar">
+          <div class="search-slot">Dungeon party</div>
           <div class="party-toggle" role="radiogroup" aria-label="Розмір групи">
             <button
               v-for="size in GROUP_SIZES"
@@ -165,15 +177,15 @@ function balanceTone(participantId) {
               role="radio"
               @click="setGroupSize(size)"
             >
-              <Users :size="16" />
+              <Users :size="15" />
               <span>{{ size }}</span>
             </button>
           </div>
         </div>
 
-        <div class="summary-strip">
+        <div class="summary-strip" aria-label="Підсумок луту">
           <article>
-            <span>Усього</span>
+            <span>Усього срібла</span>
             <strong>{{ formattedTotal }}</strong>
           </article>
           <article>
@@ -186,26 +198,33 @@ function balanceTone(participantId) {
           </article>
         </div>
 
-        <div class="party-ledger" aria-label="Лут учасників групи">
+        <div class="ledger-table" aria-label="Лут учасників групи">
+          <div class="ledger-head" aria-hidden="true">
+            <span>Гравець</span>
+            <span>Лут у silver</span>
+            <span>Баланс</span>
+          </div>
+
           <div
             v-for="(participant, index) in participantValidation"
             :key="participant.id"
             class="participant-row"
           >
-            <div class="rank-gem">
-              <Gem :size="16" />
-              <span>{{ index + 1 }}</span>
+            <div class="player-cell">
+              <div class="tier-badge">
+                <Gem :size="15" />
+                <span>{{ index + 1 }}</span>
+              </div>
+              <label>
+                <span>Гравець</span>
+                <input
+                  v-model="participants[index].name"
+                  type="text"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+              </label>
             </div>
-
-            <label>
-              <span>Ім'я</span>
-              <input
-                v-model="participants[index].name"
-                type="text"
-                autocomplete="off"
-                spellcheck="false"
-              />
-            </label>
 
             <label class="silver-input">
               <span>Лут у silver</span>
@@ -225,25 +244,36 @@ function balanceTone(participantId) {
         </div>
       </section>
 
-      <aside class="result-panel" aria-live="polite">
-        <div class="result-heading">
-          <div class="seal">
-            <ScrollText :size="24" stroke-width="1.7" />
+      <aside class="inventory-window" aria-live="polite">
+        <div class="inventory-header">
+          <div class="inventory-avatar">
+            <ScrollText :size="28" stroke-width="1.7" />
           </div>
           <div>
-            <p class="eyebrow">Розрахунок</p>
-            <h2>Клятви срібла</h2>
+            <p>Inventory</p>
+            <h2>Перекази</h2>
+          </div>
+        </div>
+
+        <div class="inventory-stats">
+          <div>
+            <Coins :size="17" />
+            <span>{{ formattedTotal }}</span>
+          </div>
+          <div>
+            <PackageOpen :size="17" />
+            <span>{{ transactions.length }}</span>
           </div>
         </div>
 
         <div v-if="hasInvalidLoot" class="state-card warning">
-          <Shield :size="28" />
+          <ShieldAlert :size="31" />
           <strong>Некоректне значення silver</strong>
-          <span>Вводь тільки цілі значення Albion silver.</span>
+          <span>Вводь тільки цілі невід’ємні значення Albion silver.</span>
         </div>
 
         <div v-else-if="!hasTransfers" class="state-card success">
-          <Sparkles :size="28" />
+          <Sparkles :size="31" />
           <strong>Сховище збалансоване</strong>
           <span>Ніхто нікому не винен silver.</span>
         </div>
@@ -253,30 +283,24 @@ function balanceTone(participantId) {
             v-for="transaction in transactions"
             :key="`${transaction.fromId}-${transaction.toId}-${transaction.amount}`"
           >
-            <div class="transaction-icon">
-              <Coins :size="18" />
+            <div class="trade-icon">
+              <ArrowRightLeft :size="18" />
             </div>
-            <div>
+            <div class="trade-copy">
               <strong>{{ transaction.fromName }}</strong>
-              <span>віддає {{ transaction.toName }}</span>
+              <span>переказує {{ transaction.toName }}</span>
             </div>
             <b>{{ formatSilver(transaction.amount) }}</b>
           </li>
         </ol>
 
-        <div class="rune-divider" aria-hidden="true">
-          <span />
-          <i />
-          <span />
-        </div>
-
-        <div class="share-rules">
+        <div class="inventory-footer">
           <div>
             <span>Цільова частка</span>
             <strong>{{ formattedShare }}</strong>
           </div>
           <div>
-            <span>Бонусна остача</span>
+            <span>Остачу отримують</span>
             <strong>перші {{ lootResult?.remainder ?? 0 }}</strong>
           </div>
         </div>
