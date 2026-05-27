@@ -16,7 +16,7 @@ import {
   splitLoot,
 } from './lib/splitLoot';
 
-const defaultNames = ['Vanguard', 'Mystic', 'Ranger', 'Reaver', 'Warden'];
+const defaultNames = ['Авангард', 'Містик', 'Рейнджер', 'Розбійник', 'Вартовий'];
 
 const sampleLoot = {
   2: ['148000', '91000'],
@@ -90,7 +90,7 @@ function createParticipants(size) {
 }
 
 function formatSilver(value) {
-  return new Intl.NumberFormat('en-US').format(value);
+  return new Intl.NumberFormat('uk-UA').format(value);
 }
 
 function setGroupSize(size) {
@@ -103,10 +103,10 @@ function participantBalance(participantId) {
 
 function balanceLabel(participantId) {
   const balance = participantBalance(participantId);
-  if (!balance) return 'Pending';
-  if (balance.balance > 0) return `Pays out ${formatSilver(balance.balance)}`;
-  if (balance.balance < 0) return `Receives ${formatSilver(Math.abs(balance.balance))}`;
-  return 'Balanced';
+  if (!balance) return 'Очікує';
+  if (balance.balance > 0) return `Віддає ${formatSilver(balance.balance)}`;
+  if (balance.balance < 0) return `Отримує ${formatSilver(Math.abs(balance.balance))}`;
+  return 'Збалансовано';
 }
 
 function balanceTone(participantId) {
@@ -136,14 +136,14 @@ function balanceTone(participantId) {
         </div>
         <div>
           <p class="eyebrow">Albion Silver</p>
-          <h1>Loot Tribunal</h1>
+          <h1>Трибунал Луту</h1>
         </div>
       </div>
 
       <div class="vault-total" aria-live="polite">
         <Coins :size="20" />
         <span>{{ formattedTotal }}</span>
-        <small>silver in vault</small>
+        <small>silver у сховищі</small>
       </div>
     </header>
 
@@ -151,11 +151,11 @@ function balanceTone(participantId) {
       <section class="calculator-panel" aria-labelledby="split-title">
         <div class="panel-heading">
           <div>
-            <p class="eyebrow">Dungeon Party</p>
-            <h2 id="split-title">Equal Split Ledger</h2>
+            <p class="eyebrow">Паті данжу</p>
+            <h2 id="split-title">Рівний розподіл</h2>
           </div>
 
-          <div class="party-toggle" role="radiogroup" aria-label="Party size">
+          <div class="party-toggle" role="radiogroup" aria-label="Розмір групи">
             <button
               v-for="size in GROUP_SIZES"
               :key="size"
@@ -173,20 +173,20 @@ function balanceTone(participantId) {
 
         <div class="summary-strip">
           <article>
-            <span>Total</span>
+            <span>Усього</span>
             <strong>{{ formattedTotal }}</strong>
           </article>
           <article>
-            <span>Base share</span>
+            <span>Базова частка</span>
             <strong>{{ formattedShare }}</strong>
           </article>
           <article>
-            <span>Remainder</span>
+            <span>Остача</span>
             <strong>{{ formattedRemainder }}</strong>
           </article>
         </div>
 
-        <div class="party-ledger" aria-label="Party loot entries">
+        <div class="party-ledger" aria-label="Лут учасників групи">
           <div
             v-for="(participant, index) in participantValidation"
             :key="participant.id"
@@ -198,7 +198,7 @@ function balanceTone(participantId) {
             </div>
 
             <label>
-              <span>Name</span>
+              <span>Ім'я</span>
               <input
                 v-model="participants[index].name"
                 type="text"
@@ -208,13 +208,13 @@ function balanceTone(participantId) {
             </label>
 
             <label class="silver-input">
-              <span>Loot silver</span>
+              <span>Лут у silver</span>
               <input
                 v-model="participants[index].loot"
                 :class="{ invalid: !participant.isLootValid }"
                 inputmode="numeric"
                 autocomplete="off"
-                aria-label="Loot silver"
+                aria-label="Лут у silver"
               />
             </label>
 
@@ -231,21 +231,21 @@ function balanceTone(participantId) {
             <ScrollText :size="24" stroke-width="1.7" />
           </div>
           <div>
-            <p class="eyebrow">Settlement</p>
-            <h2>Silver Oaths</h2>
+            <p class="eyebrow">Розрахунок</p>
+            <h2>Клятви срібла</h2>
           </div>
         </div>
 
         <div v-if="hasInvalidLoot" class="state-card warning">
           <Shield :size="28" />
-          <strong>Invalid silver mark</strong>
-          <span>Use whole Albion silver values only.</span>
+          <strong>Некоректне значення silver</strong>
+          <span>Вводь тільки цілі значення Albion silver.</span>
         </div>
 
         <div v-else-if="!hasTransfers" class="state-card success">
           <Sparkles :size="28" />
-          <strong>The vault is even</strong>
-          <span>No one owes silver.</span>
+          <strong>Сховище збалансоване</strong>
+          <span>Ніхто нікому не винен silver.</span>
         </div>
 
         <ol v-else class="transaction-list">
@@ -258,7 +258,7 @@ function balanceTone(participantId) {
             </div>
             <div>
               <strong>{{ transaction.fromName }}</strong>
-              <span>gives {{ transaction.toName }}</span>
+              <span>віддає {{ transaction.toName }}</span>
             </div>
             <b>{{ formatSilver(transaction.amount) }}</b>
           </li>
@@ -272,12 +272,12 @@ function balanceTone(participantId) {
 
         <div class="share-rules">
           <div>
-            <span>Target share</span>
+            <span>Цільова частка</span>
             <strong>{{ formattedShare }}</strong>
           </div>
           <div>
-            <span>Bonus silver</span>
-            <strong>first {{ lootResult?.remainder ?? 0 }}</strong>
+            <span>Бонусна остача</span>
+            <strong>перші {{ lootResult?.remainder ?? 0 }}</strong>
           </div>
         </div>
       </aside>

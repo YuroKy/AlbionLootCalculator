@@ -3,7 +3,7 @@ export const GROUP_SIZES = [2, 3, 5];
 export function splitLoot(participants) {
   const normalized = participants.map((participant, index) => ({
     id: participant.id ?? index,
-    name: participant.name?.trim() || `Adventurer ${index + 1}`,
+    name: participant.name?.trim() || `Учасник ${index + 1}`,
     loot: participant.loot,
   }));
 
