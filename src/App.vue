@@ -2,13 +2,18 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import {
   ArrowRightLeft,
+  CheckCircle2,
   Coins,
   Copy,
   Crown,
+  Download,
   Eraser,
+  FileInput,
+  Filter,
   Gem,
   HandCoins,
   Link2,
+  MessageSquare,
   Minus,
   PackageOpen,
   Plus,
@@ -18,6 +23,7 @@ import {
   ShieldAlert,
   Sparkles,
   Trash2,
+  Upload,
   Users,
 } from '@lucide/vue';
 import { GROUP_SIZES, splitLoot } from './lib/splitLoot';
@@ -29,6 +35,16 @@ import {
   normalizeHistoryEntries,
   summarizeHistoryEntry,
 } from './lib/history';
+import {
+  applyDeductionsToParticipants,
+  buildDiscordSummary,
+  calculateDeductions,
+  calculatePlayerStats,
+  exportHistory,
+  importHistory,
+  parseParticipantImport,
+  transactionKey,
+} from './lib/practical';
 import { formatSilver, formatSilverInput, isValidSilverInput, parseSilverInput } from './lib/silver';
 import {
   MAX_GROUP_SIZE,
@@ -50,9 +66,18 @@ const sampleLoot = {
 
 const groupSize = ref(3);
 const participants = ref(createParticipants(groupSize.value));
+const deductions = ref({ tax: '', repair: '', other: '' });
+const paidTransactions = ref({});
 const historyEntries = ref([]);
 const copyStatus = ref('');
 const completionStamp = ref(false);
+const importOpen = ref(false);
+const importText = ref('');
+const importErrors = ref([]);
+const historyFilterPlayer = ref('');
+const historyFilterMinTotal = ref('');
+const backupText = ref('');
+const backupError = ref('');
 let saveReady = false;
 let copyStatusTimer;
 let completionStampTimer;
@@ -62,6 +87,8 @@ onMounted(() => {
   if (loadedState) {
     groupSize.value = loadedState.groupSize;
     participants.value = ensureParticipantCount(loadedState.participants, loadedState.groupSize);
+    deductions.value = loadedState.deductions;
+    paidTransactions.value = loadedState.paidTransactions ?? {};
   }
 
   historyEntries.value = loadHistoryEntries();
@@ -69,10 +96,10 @@ onMounted(() => {
 });
 
 watch(
-  [groupSize, participants],
+  [groupSize, participants, deductions, paidTransactions],
   () => {
     if (!saveReady) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(currentState()));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(currentState({ includePaid: true })));
   },
   { deep: true },
 );
@@ -92,43 +119,79 @@ const participantValidation = computed(() =>
   })),
 );
 
+const deductionSummary = computed(() => calculateDeductions(deductions.value));
 const hasInvalidLoot = computed(() =>
   participantValidation.value.some((participant) => !participant.isLootValid),
 );
+const hasInvalidDeductions = computed(() => deductionSummary.value.invalidFields.length > 0);
+const hasInvalidInput = computed(() => hasInvalidLoot.value || hasInvalidDeductions.value);
+
+const rawParticipants = computed(() =>
+  participants.value.map((participant, index) => ({
+    id: participant.id,
+    name: participant.name?.trim() || `Учасник ${index + 1}`,
+    loot: isValidSilverInput(participant.loot) ? parseSilverInput(participant.loot) : 0,
+  })),
+);
+
+const distributionInput = computed(() =>
+  applyDeductionsToParticipants(rawParticipants.value, deductionSummary.value.total),
+);
 
 const lootResult = computed(() => {
-  if (hasInvalidLoot.value) return null;
-
-  return splitLoot(
-    participants.value.map((participant) => ({
-      id: participant.id,
-      name: participant.name,
-      loot: parseSilverInput(participant.loot),
-    })),
-  );
+  if (hasInvalidInput.value) return null;
+  return splitLoot(distributionInput.value.participants);
 });
 
 const balanceById = computed(() => {
   const balances = new Map();
-
   lootResult.value?.balances.forEach((participant) => {
     balances.set(participant.id, participant);
   });
-
   return balances;
 });
 
+const formattedGrossTotal = computed(() => formatSilver(distributionInput.value.grossTotal));
+const formattedDeductions = computed(() => formatSilver(distributionInput.value.totalDeduction));
 const formattedTotal = computed(() => formatSilver(lootResult.value?.total ?? 0));
 const formattedShare = computed(() => formatSilver(lootResult.value?.baseShare ?? 0));
 const formattedRemainder = computed(() => formatSilver(lootResult.value?.remainder ?? 0));
 const transactions = computed(() => lootResult.value?.transactions ?? []);
+const transactionRows = computed(() =>
+  transactions.value.map((transaction, index) => {
+    const key = transactionKey(transaction, index);
+    return {
+      ...transaction,
+      key,
+      paid: Boolean(paidTransactions.value[key]),
+    };
+  }),
+);
 const hasTransfers = computed(() => transactions.value.length > 0);
+const paidCount = computed(() => transactionRows.value.filter((transaction) => transaction.paid).length);
 const canAddParticipant = computed(() => participants.value.length < MAX_GROUP_SIZE);
 const canRemoveParticipant = computed(() => participants.value.length > MIN_GROUP_SIZE);
 const canCompleteDistribution = computed(() =>
-  Boolean(!hasInvalidLoot.value && participants.value.length > 0 && lootResult.value),
+  Boolean(!hasInvalidInput.value && participants.value.length > 0 && lootResult.value),
+);
+const hasExcessDeductions = computed(
+  () => deductionSummary.value.total > distributionInput.value.grossTotal && distributionInput.value.grossTotal > 0,
 );
 const sessionStats = computed(() => calculateSessionStats(historyEntries.value));
+const playerStats = computed(() => calculatePlayerStats(historyEntries.value));
+const playerNetBars = computed(() => {
+  const topPlayers = [...playerStats.value]
+    .sort((a, b) => Math.abs(b.netBalance) - Math.abs(a.netBalance))
+    .slice(0, 6);
+  const maxNet = Math.max(...topPlayers.map((player) => Math.abs(player.netBalance)), 1);
+
+  return topPlayers.map((player) => ({
+    name: player.name,
+    value: player.netBalance,
+    tone: player.netBalance >= 0 ? 'receive' : 'pay',
+    width: `${Math.max(8, Math.round((Math.abs(player.netBalance) / maxNet) * 100))}%`,
+  }));
+});
 const totalChartBars = computed(() => {
   const maxTotal = Math.max(...historyEntries.value.map((entry) => entry.total), 1);
 
@@ -158,6 +221,21 @@ const topPlayerBars = computed(() => {
     width: `${Math.max(8, Math.round((player.loot / maxLoot) * 100))}%`,
   }));
 });
+const availableHistoryPlayers = computed(() =>
+  [...new Set(historyEntries.value.flatMap((entry) => entry.participants.map((participant) => participant.name)))]
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, 'uk')),
+);
+const filteredHistoryEntries = computed(() => {
+  const player = historyFilterPlayer.value;
+  const minTotal = parseSilverInput(historyFilterMinTotal.value);
+
+  return historyEntries.value.filter((entry) => {
+    const matchesPlayer = !player || entry.participants.some((participant) => participant.name === player);
+    const matchesTotal = !minTotal || entry.total >= minTotal;
+    return matchesPlayer && matchesTotal;
+  });
+});
 
 function loadInitialState() {
   const queryState = normalizeAppState(
@@ -186,15 +264,19 @@ function loadHistoryEntries() {
   }
 }
 
-function currentState() {
-  return {
+function currentState({ includePaid = false } = {}) {
+  const state = {
     groupSize: groupSize.value,
     participants: participants.value.map((participant) => ({
       id: participant.id,
       name: participant.name,
       loot: participant.loot,
     })),
+    deductions: { ...deductions.value },
   };
+
+  if (includePaid) state.paidTransactions = { ...paidTransactions.value };
+  return state;
 }
 
 function createParticipants(size) {
@@ -230,6 +312,7 @@ function setGroupSize(size) {
   const nextSize = clampGroupSize(size);
   groupSize.value = nextSize;
   participants.value = ensureParticipantCount(participants.value, nextSize);
+  paidTransactions.value = {};
 }
 
 function addParticipant() {
@@ -244,6 +327,7 @@ function addParticipant() {
     },
   ];
   groupSize.value = participants.value.length;
+  paidTransactions.value = {};
 }
 
 function removeParticipant() {
@@ -251,6 +335,7 @@ function removeParticipant() {
 
   participants.value = participants.value.slice(0, -1);
   groupSize.value = participants.value.length;
+  paidTransactions.value = {};
 }
 
 function clearLoot() {
@@ -258,6 +343,7 @@ function clearLoot() {
     ...participant,
     loot: '',
   }));
+  paidTransactions.value = {};
 }
 
 function fillZeroLoot() {
@@ -265,14 +351,23 @@ function fillZeroLoot() {
     ...participant,
     loot: '0',
   }));
+  paidTransactions.value = {};
 }
 
 function resetSample() {
   participants.value = createParticipants(groupSize.value);
+  deductions.value = { tax: '', repair: '', other: '' };
+  paidTransactions.value = {};
 }
 
 function handleSilverInput(index, event) {
   participants.value[index].loot = formatSilverInput(event.target.value);
+  paidTransactions.value = {};
+}
+
+function handleDeductionInput(field, event) {
+  deductions.value[field] = formatSilverInput(event.target.value);
+  paidTransactions.value = {};
 }
 
 function handleSilverKeydown(event) {
@@ -296,9 +391,23 @@ function handleSilverKeydown(event) {
   event.preventDefault();
 }
 
-function handleSilverPaste(index, event) {
+function handleSilverPaste(assign, event) {
   event.preventDefault();
-  participants.value[index].loot = formatSilverInput(event.clipboardData?.getData('text') ?? '');
+  assign(formatSilverInput(event.clipboardData?.getData('text') ?? ''));
+}
+
+function handleParticipantPaste(index, event) {
+  handleSilverPaste((value) => {
+    participants.value[index].loot = value;
+    paidTransactions.value = {};
+  }, event);
+}
+
+function handleDeductionPaste(field, event) {
+  handleSilverPaste((value) => {
+    deductions.value[field] = value;
+    paidTransactions.value = {};
+  }, event);
 }
 
 function participantBalance(participantId) {
@@ -306,7 +415,7 @@ function participantBalance(participantId) {
 }
 
 function participantLoot(participantId) {
-  return participantBalance(participantId)?.loot ?? 0;
+  return rawParticipants.value.find((participant) => participant.id === participantId)?.loot ?? 0;
 }
 
 function participantTargetShare(participantId) {
@@ -329,8 +438,15 @@ function balanceTone(participantId) {
   return 'balanced';
 }
 
+function toggleTransactionPaid(key, checked) {
+  paidTransactions.value = {
+    ...paidTransactions.value,
+    [key]: checked,
+  };
+}
+
 function copyTransferText() {
-  if (hasInvalidLoot.value) return 'Є некоректні значення silver.';
+  if (hasInvalidInput.value) return 'Є некоректні значення silver.';
   if (!hasTransfers.value) return `Лут збалансовано. Частка: ${formattedShare.value} silver.`;
 
   return transactions.value
@@ -341,9 +457,20 @@ function copyTransferText() {
     .join('\n');
 }
 
+function currentDiscordSummary() {
+  return buildDiscordSummary({
+    grossTotal: distributionInput.value.grossTotal,
+    deductions: deductionSummary.value,
+    distributableTotal: lootResult.value?.total ?? 0,
+    total: lootResult.value?.total ?? 0,
+    baseShare: lootResult.value?.baseShare ?? 0,
+    transactions: transactions.value,
+  });
+}
+
 function shareUrl() {
   const url = new URL(window.location.href);
-  url.searchParams.set('state', serializeState(currentState()));
+  url.searchParams.set('state', serializeState(currentState({ includePaid: false })));
 
   return url.toString();
 }
@@ -361,16 +488,45 @@ function copyTransfers() {
   copyToClipboard(copyTransferText(), 'Перекази скопійовано');
 }
 
+function copyDiscord() {
+  copyToClipboard(currentDiscordSummary(), 'Discord summary скопійовано');
+}
+
 function copyShareLink() {
   copyToClipboard(shareUrl(), 'Лінк скопійовано');
+}
+
+function applyParticipantImport() {
+  const result = parseParticipantImport(importText.value);
+  importErrors.value = result.errors;
+
+  if (result.participants.length === 0) {
+    if (result.errors.length === 0) {
+      importErrors.value = [{ lineNumber: 1, message: 'додай хоча б один рядок для імпорту' }];
+    }
+    return;
+  }
+
+  participants.value = result.participants;
+  groupSize.value = result.participants.length;
+  paidTransactions.value = {};
+  showCopyStatus(
+    result.errors.length
+      ? `Імпортовано ${result.participants.length}, частину рядків пропущено`
+      : `Імпортовано ${result.participants.length} гравців`,
+  );
 }
 
 function completeDistribution() {
   if (!canCompleteDistribution.value) return;
 
   const entry = createHistoryEntry({
-    participants: lootResult.value.balances,
+    participants: rawParticipants.value,
     result: lootResult.value,
+    deductions: deductionSummary.value,
+    grossTotal: distributionInput.value.grossTotal,
+    distributableTotal: lootResult.value.total,
+    paidTransactions: paidTransactions.value,
   });
 
   historyEntries.value = [entry, ...historyEntries.value].slice(0, 50);
@@ -391,8 +547,37 @@ function clearHistory() {
   showCopyStatus('Журнал очищено');
 }
 
+function copyHistoryBackup() {
+  copyToClipboard(exportHistory(historyEntries.value), 'JSON журналу скопійовано');
+}
+
+function mergeHistoryBackup() {
+  backupError.value = '';
+  try {
+    const result = importHistory(historyEntries.value, backupText.value);
+    historyEntries.value = normalizeHistoryEntries(result.entries).slice(0, 50);
+    showCopyStatus(`Імпортовано ${result.added}, пропущено ${result.skipped}`);
+  } catch (error) {
+    backupError.value = error.message;
+  }
+}
+
 function historySummary(entry) {
   return summarizeHistoryEntry(entry);
+}
+
+function paidHistoryCount(entry) {
+  return (entry.transactions ?? []).filter((transaction) => transaction.paid).length;
+}
+
+function handleHistoryMinInput(event) {
+  historyFilterMinTotal.value = formatSilverInput(event.target.value);
+}
+
+function handleHistoryMinPaste(event) {
+  handleSilverPaste((value) => {
+    historyFilterMinTotal.value = value;
+  }, event);
 }
 
 function shortTime(value) {
@@ -448,7 +633,7 @@ function showCopyStatus(message) {
         <div class="hud-chip">
           <Coins :size="18" />
           <strong>{{ formattedTotal }}</strong>
-          <span>усього</span>
+          <span>до розподілу</span>
         </div>
         <div class="hud-chip">
           <Scale :size="18" />
@@ -475,7 +660,10 @@ function showCopyStatus(message) {
         </div>
 
         <div class="market-toolbar">
-          <div class="search-slot">Dungeon party</div>
+          <button type="button" class="search-slot import-toggle" @click="importOpen = !importOpen">
+            <FileInput :size="16" />
+            <span>Імпорт списку</span>
+          </button>
           <div class="party-toggle" role="radiogroup" aria-label="Розмір групи">
             <button
               v-for="size in GROUP_SIZES"
@@ -511,6 +699,27 @@ function showCopyStatus(message) {
           </div>
         </div>
 
+        <div v-if="importOpen" class="import-panel">
+          <label>
+            <span>Список гравців</span>
+            <textarea
+              v-model="importText"
+              rows="4"
+              placeholder="Player A 1,200,000&#10;Player B: 850000"
+            />
+          </label>
+          <button type="button" @click="applyParticipantImport">
+            <Upload :size="16" />
+            <span>Застосувати імпорт</span>
+          </button>
+          <div v-if="importErrors.length" class="notice warning">
+            <strong>Є рядки, які не вдалося імпортувати</strong>
+            <span v-for="error in importErrors" :key="`${error.lineNumber}-${error.message}`">
+              Рядок {{ error.lineNumber }}: {{ error.message }}
+            </span>
+          </div>
+        </div>
+
         <div class="action-bar" aria-label="Швидкі дії">
           <button type="button" :disabled="!canCompleteDistribution" @click="completeDistribution">
             <Sparkles :size="16" />
@@ -519,6 +728,10 @@ function showCopyStatus(message) {
           <button type="button" @click="copyTransfers">
             <Copy :size="16" />
             <span>Скопіювати перекази</span>
+          </button>
+          <button type="button" @click="copyDiscord">
+            <MessageSquare :size="16" />
+            <span>Для Discord</span>
           </button>
           <button type="button" @click="copyShareLink">
             <Link2 :size="16" />
@@ -541,18 +754,46 @@ function showCopyStatus(message) {
         <p v-if="copyStatus" class="copy-status" role="status">{{ copyStatus }}</p>
         <p v-if="completionStamp" class="completion-stamp" aria-live="polite">Розподіл завершено</p>
 
+        <div class="deductions-panel" aria-label="Вирахування перед розподілом">
+          <div>
+            <p>Вирахування перед розподілом</p>
+            <strong>{{ formattedDeductions }} silver</strong>
+          </div>
+          <label v-for="item in deductionSummary.items" :key="item.key">
+            <span>{{ item.label }}</span>
+            <input
+              :value="deductions[item.key]"
+              :class="{ invalid: deductionSummary.invalidFields.includes(item.key) }"
+              inputmode="numeric"
+              autocomplete="off"
+              @keydown="handleSilverKeydown"
+              @paste="handleDeductionPaste(item.key, $event)"
+              @input="handleDeductionInput(item.key, $event)"
+            />
+          </label>
+        </div>
+
+        <div v-if="hasExcessDeductions" class="notice warning inline-notice">
+          <ShieldAlert :size="18" />
+          <span>Вирахування більші за зібраний лут, тому до розподілу піде 0 silver.</span>
+        </div>
+
         <div class="summary-strip" aria-label="Підсумок луту">
           <article>
-            <span>Усього срібла</span>
+            <span>Усього зібрано</span>
+            <strong :key="formattedGrossTotal">{{ formattedGrossTotal }}</strong>
+          </article>
+          <article>
+            <span>Вирахування</span>
+            <strong :key="formattedDeductions">{{ formattedDeductions }}</strong>
+          </article>
+          <article>
+            <span>До розподілу</span>
             <strong :key="formattedTotal">{{ formattedTotal }}</strong>
           </article>
           <article>
             <span>Базова частка</span>
             <strong :key="formattedShare">{{ formattedShare }}</strong>
-          </article>
-          <article>
-            <span>Остача</span>
-            <strong :key="formattedRemainder">{{ formattedRemainder }}</strong>
           </article>
         </div>
 
@@ -581,6 +822,7 @@ function showCopyStatus(message) {
                   type="text"
                   autocomplete="off"
                   spellcheck="false"
+                  @input="paidTransactions = {}"
                 />
               </label>
             </div>
@@ -595,7 +837,7 @@ function showCopyStatus(message) {
                 autocomplete="off"
                 aria-label="Лут у silver"
                 @keydown="handleSilverKeydown"
-                @paste="handleSilverPaste(index, $event)"
+                @paste="handleParticipantPaste(index, $event)"
                 @input="handleSilverInput(index, $event)"
               />
               <small>
@@ -633,10 +875,15 @@ function showCopyStatus(message) {
           </div>
         </div>
 
-        <div v-if="hasInvalidLoot" class="state-card warning">
+        <div v-if="hasTransfers" class="transaction-progress">
+          <span>{{ paidCount }} / {{ transactions.length }} сплачено</span>
+          <div><i :style="{ width: `${Math.round((paidCount / transactions.length) * 100)}%` }" /></div>
+        </div>
+
+        <div v-if="hasInvalidInput" class="state-card warning">
           <ShieldAlert :size="31" />
           <strong>Некоректне значення silver</strong>
-          <span>Вводь тільки цілі невід’ємні значення Albion silver.</span>
+          <span>Вводь тільки цілі невідʼємні значення Albion silver.</span>
         </div>
 
         <div v-else-if="!hasTransfers" class="state-card success">
@@ -647,9 +894,18 @@ function showCopyStatus(message) {
 
         <ol v-else class="transaction-list">
           <li
-            v-for="transaction in transactions"
-            :key="`${transaction.fromId}-${transaction.toId}-${transaction.amount}`"
+            v-for="transaction in transactionRows"
+            :key="transaction.key"
+            :class="{ paid: transaction.paid }"
           >
+            <label class="transaction-paid">
+              <input
+                type="checkbox"
+                :checked="transaction.paid"
+                @change="toggleTransactionPaid(transaction.key, $event.target.checked)"
+              />
+              <CheckCircle2 :size="18" />
+            </label>
             <div class="trade-icon">
               <ArrowRightLeft :size="18" />
             </div>
@@ -680,10 +936,16 @@ function showCopyStatus(message) {
           <p>Session board</p>
           <h2 id="session-dashboard-title">Статистика сесії</h2>
         </div>
-        <button type="button" :disabled="historyEntries.length === 0" @click="clearHistory">
-          <Trash2 :size="16" />
-          <span>Очистити журнал</span>
-        </button>
+        <div class="dashboard-actions">
+          <button type="button" :disabled="historyEntries.length === 0" @click="copyHistoryBackup">
+            <Download :size="16" />
+            <span>Експорт журналу</span>
+          </button>
+          <button type="button" :disabled="historyEntries.length === 0" @click="clearHistory">
+            <Trash2 :size="16" />
+            <span>Очистити журнал</span>
+          </button>
+        </div>
       </div>
 
       <div class="stats-grid" aria-label="Підсумкова статистика">
@@ -709,7 +971,7 @@ function showCopyStatus(message) {
         </article>
         <article>
           <span>Топ лутер</span>
-          <strong>{{ sessionStats.topPlayer?.name ?? '—' }}</strong>
+          <strong>{{ sessionStats.topPlayer?.name ?? '-' }}</strong>
         </article>
       </div>
 
@@ -751,6 +1013,55 @@ function showCopyStatus(message) {
         </article>
       </div>
 
+      <div class="player-stats-panel">
+        <div class="history-heading">
+          <div>
+            <p>Player ledger</p>
+            <h2>Статистика гравців</h2>
+          </div>
+        </div>
+        <div v-if="playerNetBars.length" class="bar-chart net-chart">
+          <div v-for="bar in playerNetBars" :key="bar.name" class="chart-row">
+            <span>{{ bar.name }}</span>
+            <div><i :data-tone="bar.tone" :style="{ width: bar.width }" /></div>
+            <b>{{ formatSilver(bar.value) }}</b>
+          </div>
+        </div>
+        <div v-if="playerStats.length" class="player-stats-table">
+          <div class="player-stats-head" aria-hidden="true">
+            <span>Гравець</span>
+            <span>Лут</span>
+            <span>Рани</span>
+            <span>Середнє</span>
+            <span>Платив</span>
+            <span>Отримував</span>
+            <span>Net</span>
+          </div>
+          <div v-for="player in playerStats" :key="player.name" class="player-stats-row">
+            <strong>{{ player.name }}</strong>
+            <span>{{ formatSilver(player.totalLoot) }}</span>
+            <span>{{ player.splitCount }}</span>
+            <span>{{ formatSilver(player.averageLoot) }}</span>
+            <span>{{ player.paidCount }}</span>
+            <span>{{ player.receivedCount }}</span>
+            <b :data-tone="player.netBalance >= 0 ? 'receive' : 'pay'">{{ formatSilver(player.netBalance) }}</b>
+          </div>
+        </div>
+        <p v-else>Заверши розподіл, щоб зібрати статистику по гравцях.</p>
+      </div>
+
+      <div class="backup-panel">
+        <label>
+          <span>Імпорт журналу з JSON</span>
+          <textarea v-model="backupText" rows="3" placeholder="Встав JSON журналу сюди" />
+        </label>
+        <button type="button" @click="mergeHistoryBackup">
+          <Upload :size="16" />
+          <span>Імпорт журналу</span>
+        </button>
+        <p v-if="backupError" class="notice warning">{{ backupError }}</p>
+      </div>
+
       <div class="history-panel" aria-labelledby="history-title">
         <div class="history-heading">
           <div>
@@ -759,10 +1070,41 @@ function showCopyStatus(message) {
           </div>
         </div>
 
+        <div class="history-filters" aria-label="Фільтри журналу">
+          <label>
+            <Filter :size="15" />
+            <span>Гравець</span>
+            <select v-model="historyFilterPlayer">
+              <option value="">Усі</option>
+              <option v-for="player in availableHistoryPlayers" :key="player" :value="player">
+                {{ player }}
+              </option>
+            </select>
+          </label>
+          <label>
+            <Coins :size="15" />
+            <span>Мін. total</span>
+            <input
+              :value="historyFilterMinTotal"
+              inputmode="numeric"
+              autocomplete="off"
+              @keydown="handleSilverKeydown"
+              @paste="handleHistoryMinPaste"
+              @input="handleHistoryMinInput"
+            />
+          </label>
+        </div>
+
         <div v-if="historyEntries.length === 0" class="history-empty">
           <Sparkles :size="28" />
           <strong>Журнал порожній</strong>
-          <span>Натисни “Завершити розподіл”, щоб додати перший запис.</span>
+          <span>Натисни "Завершити розподіл", щоб додати перший запис.</span>
+        </div>
+
+        <div v-else-if="filteredHistoryEntries.length === 0" class="history-empty">
+          <ShieldAlert :size="28" />
+          <strong>Нічого не знайдено</strong>
+          <span>Зміни фільтри журналу.</span>
         </div>
 
         <div v-else class="history-table">
@@ -772,17 +1114,19 @@ function showCopyStatus(message) {
             <span>Total</span>
             <span>Частка</span>
             <span>Перекази</span>
+            <span>Сплачено</span>
             <span>Топ</span>
             <span>Дії</span>
           </div>
 
-          <div v-for="entry in historyEntries" :key="entry.id" class="history-row">
+          <div v-for="entry in filteredHistoryEntries" :key="entry.id" class="history-row">
             <span>{{ historyTime(entry.createdAt) }}</span>
             <span>{{ historySummary(entry).playerCount }}</span>
             <strong>{{ formatSilver(entry.total) }}</strong>
             <span>{{ formatSilver(entry.baseShare) }}</span>
             <span>{{ historySummary(entry).transferCount }}</span>
-            <span>{{ historySummary(entry).largestPayer }} → {{ historySummary(entry).largestReceiver }}</span>
+            <span>{{ paidHistoryCount(entry) }} / {{ entry.transactions.length }}</span>
+            <span>{{ historySummary(entry).largestPayer }} -> {{ historySummary(entry).largestReceiver }}</span>
             <div class="history-actions">
               <button type="button" @click="copyHistoryEntry(entry)">Скопіювати</button>
               <button type="button" @click="deleteHistoryEntry(entry.id)">Видалити</button>

@@ -1,6 +1,16 @@
+import { transactionKey } from './practical';
+
 export const HISTORY_STORAGE_KEY = 'albion-loot-calculator-history';
 
-export function createHistoryEntry({ participants, result, now = new Date() }) {
+export function createHistoryEntry({
+  participants,
+  result,
+  deductions = { tax: 0, repair: 0, other: 0, total: 0 },
+  grossTotal = result.total,
+  distributableTotal = result.total,
+  paidTransactions = {},
+  now = new Date(),
+}) {
   return {
     id: `split-${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
     createdAt: now.toISOString(),
@@ -9,10 +19,21 @@ export function createHistoryEntry({ participants, result, now = new Date() }) {
       name: participant.name,
       loot: participant.loot,
     })),
-    total: result.total,
+    total: distributableTotal,
+    grossTotal,
+    distributableTotal,
+    deductions: {
+      tax: Number(deductions.tax) || 0,
+      repair: Number(deductions.repair) || 0,
+      other: Number(deductions.other) || 0,
+      total: Number(deductions.total) || 0,
+    },
     baseShare: result.baseShare,
     remainder: result.remainder,
-    transactions: result.transactions.map((transaction) => ({ ...transaction })),
+    transactions: result.transactions.map((transaction, index) => ({
+      ...transaction,
+      paid: Boolean(paidTransactions[transactionKey(transaction, index)]),
+    })),
   };
 }
 
@@ -26,27 +47,40 @@ export function normalizeHistoryEntries(value) {
       createdAt: typeof entry.createdAt === 'string' ? entry.createdAt : new Date().toISOString(),
       participants: Array.isArray(entry.participants) ? entry.participants : [],
       total: Number(entry.total) || 0,
+      grossTotal: Number(entry.grossTotal ?? entry.total) || 0,
+      distributableTotal: Number(entry.distributableTotal ?? entry.total) || 0,
+      deductions:
+        entry.deductions && typeof entry.deductions === 'object'
+          ? {
+              tax: Number(entry.deductions.tax) || 0,
+              repair: Number(entry.deductions.repair) || 0,
+              other: Number(entry.deductions.other) || 0,
+              total: Number(entry.deductions.total) || 0,
+            }
+          : { tax: 0, repair: 0, other: 0, total: 0 },
       baseShare: Number(entry.baseShare) || 0,
       remainder: Number(entry.remainder) || 0,
-      transactions: Array.isArray(entry.transactions) ? entry.transactions : [],
+      transactions: Array.isArray(entry.transactions)
+        ? entry.transactions.map((transaction) => ({ ...transaction, paid: Boolean(transaction.paid) }))
+        : [],
     }));
 }
 
 export function summarizeHistoryEntry(entry) {
   const payer = entry.transactions.reduce(
     (largest, transaction) => (transaction.amount > largest.amount ? transaction : largest),
-    { fromName: '—', toName: '—', amount: 0 },
+    { fromName: '-', toName: '-', amount: 0 },
   );
   const receiver = entry.transactions.reduce(
     (largest, transaction) => (transaction.amount > largest.amount ? transaction : largest),
-    { fromName: '—', toName: '—', amount: 0 },
+    { fromName: '-', toName: '-', amount: 0 },
   );
 
   return {
     playerCount: entry.participants.length,
     transferCount: entry.transactions.length,
-    largestPayer: payer.amount > 0 ? payer.fromName : '—',
-    largestReceiver: receiver.amount > 0 ? receiver.toName : '—',
+    largestPayer: payer.amount > 0 ? payer.fromName : '-',
+    largestReceiver: receiver.amount > 0 ? receiver.toName : '-',
   };
 }
 
@@ -90,11 +124,17 @@ export function formatHistoryEntry(entry, formatSilver) {
     `Переказів: ${summary.transferCount}`,
   ];
 
+  if ((entry.deductions?.total ?? 0) > 0) {
+    lines.splice(3, 0, `Вирахування: ${formatSilver(entry.deductions.total)} silver`);
+  }
+
   if (entry.transactions.length > 0) {
     lines.push(
       ...entry.transactions.map(
         (transaction) =>
-          `${transaction.fromName} -> ${transaction.toName}: ${formatSilver(transaction.amount)} silver`,
+          `${transaction.fromName} -> ${transaction.toName}: ${formatSilver(transaction.amount)} silver${
+            transaction.paid ? ' (сплачено)' : ''
+          }`,
       ),
     );
   } else {

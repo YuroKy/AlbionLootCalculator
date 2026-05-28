@@ -1,3 +1,5 @@
+import { formatSilverInput } from './silver';
+
 export const MIN_GROUP_SIZE = 1;
 export const MAX_GROUP_SIZE = 10;
 export const STORAGE_KEY = 'albion-loot-calculator-state';
@@ -35,8 +37,16 @@ export function normalizeParticipantState(participants) {
     .map((participant, index) => ({
       id: typeof participant?.id === 'string' ? participant.id : `player-${index + 1}`,
       name: typeof participant?.name === 'string' ? participant.name : `Учасник ${index + 1}`,
-      loot: typeof participant?.loot === 'string' ? participant.loot : String(participant?.loot ?? '0'),
+      loot: formatSilverInput(participant?.loot ?? '0') || '0',
     }));
+}
+
+export function normalizeDeductionsState(deductions) {
+  return {
+    tax: formatSilverInput(deductions?.tax ?? ''),
+    repair: formatSilverInput(deductions?.repair ?? ''),
+    other: formatSilverInput(deductions?.other ?? ''),
+  };
 }
 
 export function normalizeAppState(state) {
@@ -49,5 +59,10 @@ export function normalizeAppState(state) {
   return {
     groupSize: clampGroupSize(groupSize),
     participants: participants.slice(0, groupSize),
+    deductions: normalizeDeductionsState(state.deductions),
+    paidTransactions:
+      state.paidTransactions && typeof state.paidTransactions === 'object' && !Array.isArray(state.paidTransactions)
+        ? Object.fromEntries(Object.entries(state.paidTransactions).map(([key, value]) => [key, Boolean(value)]))
+        : {},
   };
 }
